@@ -23,28 +23,16 @@ def calculate_initial_compass_bearing(pointA, pointB):
 
     return compass_bearing
 
-# Load GPX file
-with open('tracks/shadow-riga-salacgriva.gpx', 'r') as gpx_file:
-    gpx = gpxpy.parse(gpx_file)
+# List of GPX files for each boat and corresponding boat names
+gpx_files = [
+    'tracks/thora-riga-salacgriva.gpx',
+    'tracks/nolax-riga-salacgriva.gpx',
+    'tracks/shadow-riga-salacgriva.gpx',
+]
 
-# Extract track points
-track_points = []
-for track in gpx.tracks:
-    for segment in track.segments:
-        for point in segment.points:
-            track_points.append(point)
+boat_names = ['Thora', 'Nola X', 'Shadow']
 
-# Calculate bearings and distances
-bearings = []
-distances = []
-for i in range(1, len(track_points)):
-    bearing = calculate_initial_compass_bearing(track_points[i-1], track_points[i])
-    distance = geodesic((track_points[i-1].latitude, track_points[i-1].longitude),
-                        (track_points[i].latitude, track_points[i].longitude)).nautical
-    bearings.append(bearing)
-    distances.append(distance)
-
-# Assign track points to legs
+# Wind and course information
 wind_data = [
     {'leg': 'Leg 1', 'length_nm': 2.67, 'wind_angle': 230, 'course_angle': 113},
     {'leg': 'Leg 2', 'length_nm': 2.39, 'wind_angle': 230, 'course_angle': 261},
@@ -54,42 +42,74 @@ wind_data = [
     {'leg': 'Leg 6', 'length_nm': 2.67, 'wind_angle': 245, 'course_angle': 293},
 ]
 
-segments = [[] for _ in range(len(wind_data))]
-current_leg = 0
-current_leg_distance = 0
+# Initialize storage for all boats' data
+all_boats_segments = []
 
-for i in range(1, len(track_points)):
-    if current_leg < len(wind_data):
-        segments[current_leg].append(track_points[i])
-        current_leg_distance += distances[i-1]
-        
-        # Check if we reached the length of the current leg
-        if current_leg_distance >= wind_data[current_leg]['length_nm']:
-            current_leg += 1
-            current_leg_distance = 0
+# Function to parse and segment GPX data
+def process_gpx(gpx_file):
+    with open(gpx_file, 'r') as file:
+        gpx = gpxpy.parse(file)
+    
+    track_points = []
+    for track in gpx.tracks:
+        for segment in track.segments:
+            for point in segment.points:
+                track_points.append(point)
+    
+    bearings = []
+    distances = []
+    for i in range(1, len(track_points)):
+        bearing = calculate_initial_compass_bearing(track_points[i-1], track_points[i])
+        distance = geodesic((track_points[i-1].latitude, track_points[i-1].longitude),
+                            (track_points[i].latitude, track_points[i].longitude)).nautical
+        bearings.append(bearing)
+        distances.append(distance)
 
-# Print segment information
-for i, segment in enumerate(segments):
-    print(f"Leg {i+1} (Length: {wind_data[i]['length_nm']} nm, Wind Angle: {wind_data[i]['wind_angle']}, Course Angle: {wind_data[i]['course_angle']}): {len(segment)} track points")
+    # Segment track points based on wind data
+    segments = [[] for _ in range(len(wind_data))]
+    current_leg = 0
+    current_leg_distance = 0
 
-# Visualize segments
-# Convert track points to GeoDataFrame
+    for i in range(1, len(track_points)):
+        if current_leg < len(wind_data):
+            segments[current_leg].append(track_points[i])
+            current_leg_distance += distances[i-1]
+
+            if current_leg_distance >= wind_data[current_leg]['length_nm']:
+                current_leg += 1
+                current_leg_distance = 0
+    
+    return segments
+
+# Function to convert track points to GeoDataFrame
 def points_to_gdf(points):
     return gpd.GeoDataFrame(
         {'geometry': [Point(p.longitude, p.latitude) for p in points]},
         crs="EPSG:4326"
     )
 
-# Create GeoDataFrame for each segment
-gdfs = [points_to_gdf(segment) for segment in segments]
+# Process each GPX file and store segments
+for idx, gpx_file in enumerate(gpx_files):
+    segments = process_gpx(gpx_file)
+    all_boats_segments.append({
+        'name': boat_names[idx],
+        'segments': segments
+    })
 
-# Plot segments
+# Visualize the tracks of all boats
 fig, ax = plt.subplots(figsize=(10, 10))
-for i, gdf in enumerate(gdfs):
-    gdf.plot(ax=ax, label=f"Leg {i+1}", markersize=2)
+colors = ['b', 'g', 'r']  # Color list for different boats
+
+for boat_idx, boat_data in enumerate(all_boats_segments):
+    boat_segments = boat_data['segments']
+    full_track = []
+    for segment in boat_segments:
+        full_track.extend(segment)  # Combine all segments into a single track
+    gdf = points_to_gdf(full_track)
+    gdf.plot(ax=ax, color=colors[boat_idx % len(colors)], markersize=2, label=boat_data['name'])
 
 plt.legend()
-plt.title("Sailing Track Segmentation")
+plt.title("Sailing Track Comparison")
 plt.xlabel("Longitude")
 plt.ylabel("Latitude")
 plt.show()
